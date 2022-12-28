@@ -20,10 +20,15 @@ class Scraper:
 		self.url = "https://apps.lbcc.edu/schedule/scheduleDetail.cfm?term=" + term + "&courseID=" + courseID + "&semester=" + semester + "&subject=" + subject + "&catalog_nbr=" + number
 		self.session = HTMLSession()
 		self.response = self.session.get(self.url)
-		self.class_elements = self.response.html.find("td.scheduletext") 
+
+		# self.row_elements = self.response.html.find("tr")
+		# self.class_elements = [row_element.find("td.scheduletext") for row_element in self.row_elements]
+		self.parent = self.response.html.find("a[href*='javascript:void(0);']")
+		# Use this information to divide the list of td.scheduletext into lists of each row
 
 	def tester(self):
-		print(self.url)
+		for parent_el in self.parent:
+			print(parent_el.text)
 
 	def process(self):
 		class_sched = []
@@ -59,6 +64,6 @@ class Scraper:
 # MAIN
 s = Scraper("1695", "002181", "SPRING", "ACCTG", "1A")
 s.tester()
-s.process()
+# s.process()
 print("Class schedule: ")
 print(class_schedules)
