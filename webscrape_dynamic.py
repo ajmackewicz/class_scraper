@@ -10,6 +10,7 @@ page reloads and improve the overall user experience.
 
 import requests_html
 from requests_html import HTMLSession
+from collections import defaultdict
 
 
 '''
@@ -31,6 +32,8 @@ class Scraper:
 			for entry in self.response.html.find("td.scheduletext")] # Entries
 		self.class_numbers = [number.text
 			for number in self.response.html.find("a[href*='javascript:void(0);']")] # Class Numbers
+
+		self.process()
 
 	def get_id(self):
 		return self.id
@@ -69,9 +72,7 @@ class Scraper:
 			if not self.to_discard_row(i):
 				if not self.to_discard_entry(entry):
 					class_sched.append(entry)
-					print(" Appending to class_sched: " + entry)
 			else: # if to_discard_row == true
-				print(" Deleting row.")
 				class_sched.clear() # Clear all entries from sublist, all entries from class number
 
 				# Find next entry that is a class number and restart the list
@@ -85,11 +86,6 @@ class Scraper:
 				if self.entries[i + 1] in self.class_numbers:
 					self.class_schedules.append(class_sched.copy())
 
-					print("Class sched: ")
-					print(class_sched)
-					print("Class schedules: ")
-					print(self.class_schedules)
-
 					class_sched.clear() # Start with fresh sublist
 			except IndexError:
 				self.class_schedules.append(class_sched.copy())
@@ -99,27 +95,6 @@ class Scraper:
 
 	def get_class_schedules(self):
 		return self.class_schedules
-
-
-"""
-Count
-	Online vs. in-person classes
-	Late-starting vs. full-semester classes
-
-Order by time frame
-	1. M W || M
-	2. T || T Th
-	3. W
-	4. Th
-	5. F
-	6. S
-
-Order then by times of day
-
-Create list of coalesced, ordered times
-
-Create list of combinations of schedules
-"""
 
 
 '''
@@ -134,7 +109,7 @@ class Processor:
 		self.numb_online = 0
 		self.numb_inperson = 0
 		self.class_dict = class_dict
-		self.class_keys = list(class_dict.keys())
+		self.subjects = list(class_dict.keys())
 		self.class_combos = []
 
 	'''
@@ -150,7 +125,9 @@ class Processor:
 	def get_class_combos(self):
 		return self.class_combos
 
-	def get_times(self, string):
+	def get_times(self, section):
+		string = section[2]
+
 		string = string.replace(" ", "")
 		string = string.replace(":", "")
 		str_times = string.split("-")
@@ -158,7 +135,6 @@ class Processor:
 		times = []
 		for str_time in str_times:
 			if str_time[:2] == "12":
-				print("str_time begins with 12")
 				if str_time[-2:] == "AM":
 					times.append(int(str_time.replace("AM", "")) - 1200)
 				elif str_time[-2:] == "PM":
@@ -168,8 +144,14 @@ class Processor:
 			elif str_time[-2:] == "PM":
 				times.append(int(str_time.replace("PM", "")) + 1200)
 		return times 
+
+	def get_start_time(self, section):
+		return self.get_times(section)[0]
 	
-	def minimum(self, int_list):
+	def get_end_time(self, section):
+		return self.get_times(section)[1]
+	
+	def minimum_and_index(self, int_list):
 		min_i = 0
 		minimum = int_list[0]
 	
@@ -180,22 +162,39 @@ class Processor:
 		return minimum, min_i
 	
 	"""
-	Order sections of a class list by times
+	Precondition:
+		A list of a class's sections
+	Postcondition:
+		Return a dictionary of sections whose keys are the day of week
 	"""
-	def order_sections(self, sections):
+	def order_by_day(self, sections):
+		sections_by_day = defaultdict(list)
+		# Order sections for the list of sections
+		# Append the sections to the dictionary where the key is section[1] for section in sections
+		for section in sections:
+ 			# Account for multi-line class days, separated by "AND"
+			if len(section) > 8 and section[9] != "WEB":
+				days = section[1].replace(" ", "") + " " + section[9].replace(" ", "")
+			else:
+				days = section[1]
+			sections_by_day[days].append(section)
+		
+		return sections_by_day
+		
+	"""
+	Precondition:
+		A list of a class's sections
+	Postcondition:
+		Return a list of sections ordered by time
+	"""
+	def order_by_time(self, sections):
 		sections_ordered = []
-		sections_times = [self.get_times(section[2])[0] for section in sections]
+		sections_times = [self.get_start_time(section) for section in sections]
 	
-		i = 0
-		while i < len(sections):
-			print(sections)
-			print(sections_times)
-			print()
-
-			min_time, min_i = self.minimum(sections_times[i:])
+		for i in range(len(sections)):
+			min_time, min_i = self.minimum_and_index(sections_times[i:])
 			min_i = min_i + i
 			min_section = sections[min_i]
-			print("Assigned min_time, min_i: " + str(min_time) + ", " + str(min_i))
 			# Reorder sections_times
 			sections_times[min_i] = sections_times[i]
 			sections_times[i] = min_time
@@ -204,24 +203,86 @@ class Processor:
 			sections[i] = min_section
 
 			sections_ordered.append(sections[i])
-			i = i + 1
 
 		return sections_ordered
 
+	"""
+	Precondition:
+		A dictionary of lists
+			dictionary has keys subjects 
+			lists contain lists of sections
+	Postcondition:
+		A dictionary of dictionaries
+			parent dictionary has keys subjects and values dictionaries 
+			child dictionary has keys days of class and values sections ordered by start and end times
+	"""
 	def order_classes(self):
-		for key in self.class_keys:
-			self.class_dict[key] = self.order_sections(self.class_dict[key])
+		for subject in self.subjects:
+			self.class_dict[subject] = self.order_by_day(self.class_dict[subject])
+			for days in self.class_dict[subject].keys():
+				self.class_dict[subject][days] = self.order_by_time(self.class_dict[subject][days])
 
-	# def merge_classes(self):	
-		'''
-		Find smaller list in dict.
-		Use the smaller list to be merged with the larger into another list
-			- Group the sections in one subject list into equivalent times
-				- if the start times of sections from larger_list
-					are within the times of two start times of smaller_list
-				- then append the sandwich to a merged_list
+	def does_overlap(self, item, to_list):
+		does_overlap = False
+		sub_from = item.split()
+		for sub_f in sub_from:
+			for t_item in to_list:
+				sub_to = t_item.split()
+				for sub_t in sub_to:
+					if sub_f == sub_t:
+						does_overlap = True
+		return does_overlap
+	'''
+	Find smaller list in dict.
+	Use the smaller list to be merged with the larger into another list
+		- Group the sections in one subject list into equivalent times
+			- if the start times of sections from larger_list
+				are within the times of two start times of smaller_list
+			- then append the sandwich to a merged_list
+	'''
+	def merge_classes(self):	
+		class_dict_new = defaultdict(dict)
+		class_dict_copy = self.class_dict.copy()
 
-		'''
+		class_days = {}
+		for subj in class_dict_copy.keys():
+			class_days[subj] = [days for days in class_dict_copy[subj].keys()]
+
+		print("class_days:")
+		print(class_days)
+		print("self.subjects:")
+		print(self.subjects)
+
+		# Make longest_subj hold the (list of times) * with longest length
+		longest_days, long_subj = [], ""
+		for i in range(len(self.subjects)): # for each subject
+			if len(class_days[self.subjects[i]]) > len(longest_days): # compare the length of each class_days to other
+				longest_days, long_subj = class_days[self.subjects[i]], self.subjects[i] 
+
+		print("longest_days, long_subj:")
+		print(long_subj)
+		print(longest_days)
+
+		del class_days[long_subj]
+
+		# Add classes from longer list whose days do not overlap with any others to class_dict_new
+		for days in longest_days:
+			for subj in class_days.keys():
+				if not self.does_overlap(days, class_days[subj]):
+					print(" Day that was not in other subject's days: ")
+					print(days)
+					# Append the excluded sections to class_dict_new{}
+					class_dict_new[long_subj][days] = class_dict_copy[long_subj][days].copy()
+					# Remove the excluded sections from class_dict_copy{}
+					del class_dict_copy[long_subj][days]
+					
+		print("class_dict_copy: ")
+		print(class_dict_copy)
+		print("class_dict_new: ")
+		print(class_dict_new)
+
+
+			
 	# def calc_class_combos(self):
 
 		
@@ -241,6 +302,7 @@ class Initializer:
 
 
 # ACCTG 1A
+print("Scraping data...")
 s1 = Scraper("1695", "002181", "SPRING", "ACCTG", "1A")
 
 # CS 11
@@ -248,18 +310,29 @@ s1 = Scraper("1695", "002181", "SPRING", "ACCTG", "1A")
 
 # ENGL 1
 s2 = Scraper("1695", "000643", "SPRING", "ENGL", "1")
+print("Done scraping data.")
 
 scrapers = [s1, s2]
 class_dict = {} # dictionary to be passed to Processor object
 for scraper in scrapers:
-	scraper.process()
-	class_dict[scraper.get_id()] = scraper.get_class_schedules()
+	class_dict[scraper.get_id()] = scraper.get_class_schedules() # class_dict has keys ``subject + number'' and
+									# values the list of the subject's sections
 
 for key in class_dict.keys():
 	print(key)
 	print(class_dict[key])
 
 processor = Processor(class_dict)
+print("Processing data...")
 processor.order_classes()
+print("Done processing data.")
 
-print(class_dict)
+print("Printing data...")
+for subject in class_dict.keys():
+	print(subject)
+	for day in class_dict[subject]:
+		print(day)
+		for section in class_dict[subject][day]:
+			print(section)
+
+processor.merge_classes()
