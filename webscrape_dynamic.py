@@ -222,16 +222,78 @@ class Processor:
 			for days in self.class_dict[subject].keys():
 				self.class_dict[subject][days] = self.order_by_time(self.class_dict[subject][days])
 
-	def does_overlap(self, item, to_list):
-		does_overlap = False
-		sub_from = item.split()
-		for sub_f in sub_from:
-			for t_item in to_list:
-				sub_to = t_item.split()
-				for sub_t in sub_to:
-					if sub_f == sub_t:
-						does_overlap = True
-		return does_overlap
+	"""
+	Return true if any part in item (part being one separated by a space)
+	is in any part in to_list
+	"""
+	def days_overlap_list(self, days, days_list):
+		days_overlap = False
+		f_days = days.split()
+		for f_day in f_days:
+			for t_days in days_list:
+				t_days_list = t_days.split()
+				for t_day in t_days_list:
+					if f_day == t_day:
+						days_overlap = True
+		return days_overlap
+	
+	def days_overlap_dict(self, item, to_dict):
+		days_overlap = False
+		for keys in to_dict.keys():
+			if self.days_overlap_list(item, to_dict[keys]):
+				days_overlap = True
+		return days_overlap
+			
+	def get_class_days(self, c_dict):
+		class_days = defaultdict(dict) # dictionary of class days
+		# From a dictionary containing classes and their sections' information,
+		# add to a new dict under each subject a list containing all the days
+		# its sections are held
+		for subj in c_dict.keys():
+			class_days[subj] = [days for days in c_dict[subj].keys()]
+		return class_days
+
+	def times_overlap(self, times1, times2):
+		times_overlap = False
+	
+		start1, end1 = times1[0], times1[1]
+		start2, end2 = times2[0], times2[1]
+	
+		if (start2 <= start1 and start1 <= end2) or (start2 <= end1 and end1 <= end2):
+			times_overlap = True
+		elif (start1 <= start2 and start2 <= end1) or (start2 <= end1 and end1 <= end2):
+			times_overlap = True
+	
+		return times_overlap
+
+	def merge_outliers(self, c_dict):
+		c_dict_new = defaultdict(dict)
+		class_days = self.get_class_days(c_dict) # dictionary of class days
+
+		print("class_days:")
+		print(class_days)
+
+		# for subj in class_days.keys():
+		for i in range(len(self.subjects)):
+			days_list = class_days[self.subjects[i]]  
+			del class_days[self.subjects[i]] # Delete the list of days for this subject so that its days are not compared to itself
+			for days in days_list: # for each day in the subject
+				# Check if it does not overlap the entire dict
+				if not self.days_overlap_dict(days, class_days):
+					# Append sections whose days do not overlap with other sections to c_dict_new
+					c_dict_new[self.subjects[i]][days] = c_dict[self.subjects[i]][days].copy()
+			class_days[self.subjects[i]] = days_list # Re-add the list of days
+		return c_dict_new
+		
+	"""
+	Delete all entries in t_dd under the keys of f_dd, where both are dicts of dicts.
+	"""
+	def delete_overlap_dd(self, f_dd, t_dd):
+		for subj in f_dd.keys():
+			for days in f_dd[subj].keys():
+				del t_dd[subj][days]
+		return t_dd
+		
 	'''
 	Find smaller list in dict.
 	Use the smaller list to be merged with the larger into another list
@@ -244,50 +306,36 @@ class Processor:
 		class_dict_new = defaultdict(dict)
 		class_dict_copy = self.class_dict.copy()
 
-		class_days = {}
-		for subj in class_dict_copy.keys():
-			class_days[subj] = [days for days in class_dict_copy[subj].keys()]
+		class_dict_new = self.merge_outliers(class_dict_copy)
 
-		print("class_days:")
-		print(class_days)
-		print("self.subjects:")
-		print(self.subjects)
+		# Update class_dict_copy to reflect the subjects and days left in it
+		class_dict_copy = self.delete_overlap_dd(class_dict_new, class_dict_copy)
 
-		# Make longest_subj hold the (list of times) * with longest length
-		longest_days, long_subj = [], ""
-		for i in range(len(self.subjects)): # for each subject
-			if len(class_days[self.subjects[i]]) > len(longest_days): # compare the length of each class_days to other
-				longest_days, long_subj = class_days[self.subjects[i]], self.subjects[i] 
-
-		print("longest_days, long_subj:")
-		print(long_subj)
-		print(longest_days)
-
-		del class_days[long_subj]
-
-		# Add classes from longer list whose days do not overlap with any others to class_dict_new
-		for days in longest_days:
-			for subj in class_days.keys():
-				if not self.does_overlap(days, class_days[subj]):
-					print(" Day that was not in other subject's days: ")
-					print(days)
-					# Append the excluded sections to class_dict_new{}
-					class_dict_new[long_subj][days] = class_dict_copy[long_subj][days].copy()
-					# Remove the excluded sections from class_dict_copy{}
-					del class_dict_copy[long_subj][days]
-					
-		print("class_dict_copy: ")
-		print(class_dict_copy)
+		# Now we have in class_dict_copy the subjects whose sections are contained in the same day.
+		# We can compare the sections by day.
+		# Take the first subject's first section, compare it to the next subject's sections that lie on the same day. If the first section's times overlap the another section's times, discard both sections from class_dict_copy and do not append to class_dict_new, meaning to not count them as valid combinations.
+		
 		print("class_dict_new: ")
-		print(class_dict_new)
+		print_class_dict(class_dict_new)
 
+		print("class_dict_copy: ")
+		print_class_dict(class_dict_copy)
 
+		'''
+		class_days = self.get_class_days(class_dict_copy)
+		for i in range(len(self.subjects)): # for each subject
+			for day in class_dict_copy[self.subjects[i]].keys():
+				for section in class_dict_copy[self.subjects[i]][day]:
+					if self.times_overlap():
+						del class_dict_copy[self.subjects
+					
 			
+			
+		'''
 	# def calc_class_combos(self):
 
 		
 
-# MAIN
 class Initializer:
 	def __init__(self):
 		print("Enter the term number, course ID, semester (spring/fall), subject, and class number.")
@@ -301,6 +349,16 @@ class Initializer:
 		return Scraper(self.term, self.courseID, self.semester.upper(), self.subject.upper(), self.number.upper())
 
 
+def print_class_dict(c_dict):
+	for subject in c_dict.keys():
+		print(subject)
+		for day in c_dict[subject]:
+			print(day)
+			for section in c_dict[subject][day]:
+				print(section)
+		print()
+		
+# MAIN******************
 # ACCTG 1A
 print("Scraping data...")
 s1 = Scraper("1695", "002181", "SPRING", "ACCTG", "1A")
@@ -327,12 +385,7 @@ print("Processing data...")
 processor.order_classes()
 print("Done processing data.")
 
-print("Printing data...")
-for subject in class_dict.keys():
-	print(subject)
-	for day in class_dict[subject]:
-		print(day)
-		for section in class_dict[subject][day]:
-			print(section)
+print_class_dict(class_dict)
 
+print("Merging classes...")
 processor.merge_classes()
