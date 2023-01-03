@@ -13,9 +13,9 @@ from requests_html import HTMLSession
 from collections import defaultdict
 
 
-'''
+"""
 Fill list of self.class_schedules
-'''
+"""
 class Scraper:
 	def __init__(self, term, courseID, semester, subject, number):
 		self.class_schedules = []
@@ -37,12 +37,12 @@ class Scraper:
 
 	def get_id(self):
 		return self.id
-	'''
+	"""
 	Permit discarding the row if
 	- the previous entry was a class number and current entry is 'WEB';
 	- the current entry is 'CLOSED'.
 	Do not allow discarding if there is a WEB component to a class.
-	'''
+	"""
 	def to_discard_row(self, i):
 		return (
 			self.entries[i - 1] in self.class_numbers and self.entries[i] == 'WEB'
@@ -50,18 +50,18 @@ class Scraper:
 			self.entries[i] == 'CLOSED'
 			)
 
-	'''
+	"""
 	Permit discarding entry if
 	- the entry is blank; 
 	- the entry is 'CLOSED'.
-	'''
+	"""
 	def to_discard_entry(self, entry):
 		return (entry == '') or (entry == 'CLOSED')
 
-	'''
+	"""
 	Order entries into sections and
 	Add sections of classes to list of classes.
-	'''
+	"""
 	def process(self):
 		class_sched = [] # Sublist to add each class by class number
 		i = 0 # Index for entry
@@ -97,12 +97,12 @@ class Scraper:
 		return self.class_schedules
 
 
-'''
+"""
 Precondition: A dictionary with keys the class subject + class number
 		and values lists of the class's sections
 Postcondition: A dictionary with sorted sections by start time
 		(and perhaps a list with sorted classes by start time)
-'''
+"""
 class Processor:
 	def __init__(self, class_dict):
 		# Variables for the non-conflicting class combinations
@@ -112,10 +112,10 @@ class Processor:
 		self.subjects = list(class_dict.keys())
 		self.class_combos = []
 
-	'''
+	"""
 	def count_numb_online(self, key):
 		for class_listing in self.class_dict[key]:
-	'''
+	"""
 	def get_numb_online(self):
 		return self.numb_online
 	
@@ -244,27 +244,18 @@ class Processor:
 				days_overlap = True
 		return days_overlap
 			
-	def get_class_days(self, c_dict):
+	def get_class_days(self, c_dict, lst=False):
 		class_days = defaultdict(dict) # dictionary of class days
 		# From a dictionary containing classes and their sections' information,
 		# add to a new dict under each subject a list containing all the days
 		# its sections are held
 		for subj in c_dict.keys():
-			class_days[subj] = [days for days in c_dict[subj].keys()]
+			if lst:
+				for days in c_dict[subj].keys():
+					class_days[subj][days] = self.split_days(days)
+			else:
+				class_days[subj] = [days for days in c_dict[subj].keys()]
 		return class_days
-
-	def times_overlap(self, times1, times2):
-		times_overlap = False
-	
-		start1, end1 = times1[0], times1[1]
-		start2, end2 = times2[0], times2[1]
-	
-		if (start2 <= start1 and start1 <= end2) or (start2 <= end1 and end1 <= end2):
-			times_overlap = True
-		elif (start1 <= start2 and start2 <= end1) or (start2 <= end1 and end1 <= end2):
-			times_overlap = True
-	
-		return times_overlap
 
 	def merge_outliers(self, c_dict):
 		c_dict_new = defaultdict(dict)
@@ -294,47 +285,123 @@ class Processor:
 				del t_dd[subj][days]
 		return t_dd
 		
-	'''
-	Find smaller list in dict.
-	Use the smaller list to be merged with the larger into another list
-		- Group the sections in one subject list into equivalent times
-			- if the start times of sections from larger_list
-				are within the times of two start times of smaller_list
-			- then append the sandwich to a merged_list
-	'''
+	def split_days(self, str_days):
+		days_list = []
+		days_list.append(str_days)
+		if " " in str_days:
+			days_list += str_days.split()
+		return days_list
+		
+	def get_times_dict(self, c_dict):
+		times_dict = defaultdict(dict)
+
+		for subj in c_dict.keys():
+			for days in c_dict[subj].keys():
+				times_dict[subj][days] = []
+				for section in c_dict[subj][days]:
+					times_dict[subj][days].append(self.get_times(section))
+		return times_dict
+
+	def times_overlap(self, times1, times2):
+		times_overlap = False
+	
+		start1, end1 = times1[0], times1[1]
+		start2, end2 = times2[0], times2[1]
+	
+		if (start2 <= start1 and start1 <= end2) or (start2 <= end1 and end1 <= end2):
+			times_overlap = True
+		elif (start1 <= start2 and start2 <= end1) or (start2 <= end1 and end1 <= end2):
+			times_overlap = True
+	
+		return times_overlap
+
+	def times_cannot_overlap(self, f_times, t_times):
+		stop = False
+		f_end = f_times[1]
+		t_start = t_times[0]
+
+		if f_end < t_start:
+			stop = True
+		return stop
+			
+	"""
+	"""
 	def merge_classes(self):	
 		class_dict_new = defaultdict(dict)
-		class_dict_copy = self.class_dict.copy()
+		class_dict_cur = self.class_dict.copy()
 
-		class_dict_new = self.merge_outliers(class_dict_copy)
+		class_dict_new = self.merge_outliers(class_dict_cur)
 
-		# Update class_dict_copy to reflect the subjects and days left in it
-		class_dict_copy = self.delete_overlap_dd(class_dict_new, class_dict_copy)
+		# Update class_dict_cur to reflect the subjects and days left in it
+		class_dict_cur = self.delete_overlap_dd(class_dict_new, class_dict_cur)
 
-		# Now we have in class_dict_copy the subjects whose sections are contained in the same day.
-		# We can compare the sections by day.
-		# Take the first subject's first section, compare it to the next subject's sections that lie on the same day. If the first section's times overlap the another section's times, discard both sections from class_dict_copy and do not append to class_dict_new, meaning to not count them as valid combinations.
-		
+		"""
 		print("class_dict_new: ")
 		print_class_dict(class_dict_new)
 
-		print("class_dict_copy: ")
-		print_class_dict(class_dict_copy)
-
-		'''
-		class_days = self.get_class_days(class_dict_copy)
-		for i in range(len(self.subjects)): # for each subject
-			for day in class_dict_copy[self.subjects[i]].keys():
-				for section in class_dict_copy[self.subjects[i]][day]:
-					if self.times_overlap():
-						del class_dict_copy[self.subjects
-					
-			
-			
-		'''
-	# def calc_class_combos(self):
-
+		print("class_dict_cur: ")
+		print_class_dict(class_dict_cur)
+		"""
 		
+		class_days = self.get_class_days(class_dict_cur, True) # class_days = {{"M W":["M W", "M", "W"], . . ., "Sa":["Sa"]}}
+		print("class_days")
+		print(class_days)
+		print()
+		class_times = self.get_times_dict(class_dict_cur)
+		print("class_times")
+		print(class_times)
+
+		for subject in self.subjects: # for each subject
+			# Save class_dict_cur's subject's keys (days) and values (times)
+			subj_times = class_times[subject]
+			print("subject")
+			print(subject)
+			print("subj_times")
+			print(subj_times)
+			# Delete class_dict_cur's subject's keys (days) and values (times) so its times will not be compared to itself
+			del class_times[subject]
+
+			# TESTER CODE
+			for day_key in subj_times.keys(): # okay
+				for other_subject in class_times.keys():
+					print(other_subject)
+					print(class_times[other_subject])
+					for days in class_days[other_subject][day_key]: # for each day or part of day in subj's sections
+						if not days in class_days[other_subject]:
+							continue
+						s = 0
+						o = 0
+						while s < len(subj_times[day_key]):
+							while o < len(class_times[other_subject][days]):
+								# ERROR: index out of range
+								print("s = " + str(s))
+								print("o = " + str(o))
+
+								if self.times_cannot_overlap(subj_times[day_key][s], class_times[other_subject][days][o]):
+									# Then append the times that cannot
+									# overlap to the class combos
+									break
+								if self.times_overlap(subj_times[day_key][s], class_times[other_subject][days][o]):
+
+									print("These times overlap:")
+									print(subject + ", " + day_key)
+									print(subj_times[day_key][s])
+									print(other_subject + ", " + days)
+									print(class_times[other_subject][days][o])
+
+									del class_times[other_subject][days][o]
+
+									print(subject + ", " + day_key)
+									print(subj_times[day_key])
+									print(other_subject + ", " + days)
+									print(class_times[other_subject][days])
+								else:
+									o += 1
+
+							del subj_times[day_key][s]
+	
+			# Re-add subj_times to class_times
+			class_times[subject] = subj_times
 
 class Initializer:
 	def __init__(self):
@@ -375,17 +442,20 @@ class_dict = {} # dictionary to be passed to Processor object
 for scraper in scrapers:
 	class_dict[scraper.get_id()] = scraper.get_class_schedules() # class_dict has keys ``subject + number'' and
 									# values the list of the subject's sections
-
+"""
 for key in class_dict.keys():
 	print(key)
 	print(class_dict[key])
+"""
 
 processor = Processor(class_dict)
 print("Processing data...")
 processor.order_classes()
 print("Done processing data.")
 
+"""
 print_class_dict(class_dict)
+"""
 
 print("Merging classes...")
 processor.merge_classes()
