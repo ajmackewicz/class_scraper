@@ -1,3 +1,13 @@
+"""
+Many modern web applications are designed to provide their
+functionality in collaboration with the clients’ browsers.
+Instead of sending HTML pages, these apps send JavaScript
+code that instructs your browser to create the desired HTML.
+Web apps deliver dynamic content in this way to offload work
+from the server to the clients’ machines as well as to avoid
+page reloads and improve the overall user experience.
+"""
+
 import requests_html
 from requests_html import HTMLSession
 from collections import defaultdict
